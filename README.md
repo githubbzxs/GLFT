@@ -24,6 +24,12 @@
 docker compose up -d
 ```
 
+如果本机没有 Docker，可改用 SQLite（开发模式）：
+
+```bash
+DATABASE_URL=sqlite+aiosqlite:///./glft.db
+```
+
 ### 2. 后端
 ```bash
 cd backend
