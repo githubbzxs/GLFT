@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
+import { Block } from "baseui/block";
+import { Button, SIZE } from "baseui/button";
+import { Checkbox } from "baseui/checkbox";
+import { FormControl } from "baseui/form-control";
+import { Input } from "baseui/input";
+import { Notification, KIND } from "baseui/notification";
+import { useStyletron } from "baseui";
+import { toaster } from "baseui/toast";
 import api from "../api/client";
+import { getErrorMessage } from "../api/errors";
+import PageHeader from "../components/PageHeader";
 
 type Params = {
   gamma: number;
@@ -13,119 +23,173 @@ type Params = {
   auto_tuning_enabled: boolean;
 };
 
+type NumericKey = Exclude<keyof Params, "auto_tuning_enabled">;
+
+const numericFields: Array<{ key: NumericKey; label: string; description?: string }> = [
+  { key: "gamma", label: "风险厌恶系数 gamma" },
+  { key: "sigma", label: "波动率 sigma" },
+  { key: "A", label: "到达强度 A" },
+  { key: "k", label: "盘口斜率 k" },
+  { key: "time_horizon_seconds", label: "时间窗口（秒）" },
+  { key: "inventory_cap_usd", label: "库存上限（USD）" },
+  { key: "order_cap_usd", label: "单笔上限（USD）" },
+  { key: "leverage_limit", label: "杠杆上限" }
+];
+
+const parseNumber = (value: string, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
 export default function StrategyPage() {
+  const [css, theme] = useStyletron();
   const [params, setParams] = useState<Params | null>(null);
-  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const load = async () => {
-    const res = await api.get("/strategy/params");
-    setParams(res.data);
+    setLoading(true);
+    try {
+      const res = await api.get<Params>("/strategy/params");
+      setParams(res.data);
+      setError("");
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, "加载策略参数失败"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     load();
   }, []);
 
-  const update = async () => {
-    if (!params) return;
-    await api.post("/strategy/params", params);
-    setMessage("已更新策略参数");
-    setTimeout(() => setMessage(""), 2000);
+  const updateNumber = (key: NumericKey, value: string) => {
+    setParams((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return { ...prev, [key]: parseNumber(value, prev[key]) };
+    });
   };
 
-  if (!params) return null;
+  const save = async () => {
+    if (!params) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await api.post<Params>("/strategy/params", params);
+      setParams(response.data);
+      setError("");
+      toaster.positive("策略参数已更新");
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, "保存策略参数失败"));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div>
-      <div className="top-bar">
-        <div className="top-title">策略参数</div>
-        <button className="btn" onClick={update}>
-          保存参数
-        </button>
-      </div>
-      {message && <div className="panel">{message}</div>}
-      <div className="panel form-grid">
-        <label>
-          风险厌恶 gamma
-          <input
-            type="number"
-            value={params.gamma}
-            onChange={(e) => setParams({ ...params, gamma: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          波动率 sigma
-          <input
-            type="number"
-            value={params.sigma}
-            onChange={(e) => setParams({ ...params, sigma: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          到达强度 A
-          <input
-            type="number"
-            value={params.A}
-            onChange={(e) => setParams({ ...params, A: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          斜率 k
-          <input
-            type="number"
-            value={params.k}
-            onChange={(e) => setParams({ ...params, k: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          时间视窗(秒)
-          <input
-            type="number"
-            value={params.time_horizon_seconds}
-            onChange={(e) =>
-              setParams({ ...params, time_horizon_seconds: Number(e.target.value) })
-            }
-          />
-        </label>
-        <label>
-          库存上限(USD)
-          <input
-            type="number"
-            value={params.inventory_cap_usd}
-            onChange={(e) =>
-              setParams({ ...params, inventory_cap_usd: Number(e.target.value) })
-            }
-          />
-        </label>
-        <label>
-          单笔上限(USD)
-          <input
-            type="number"
-            value={params.order_cap_usd}
-            onChange={(e) => setParams({ ...params, order_cap_usd: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          杠杆上限
-          <input
-            type="number"
-            value={params.leverage_limit}
-            onChange={(e) => setParams({ ...params, leverage_limit: Number(e.target.value) })}
-          />
-        </label>
-        <label>
-          自动调参
-          <select
-            value={params.auto_tuning_enabled ? "true" : "false"}
-            onChange={(e) =>
-              setParams({ ...params, auto_tuning_enabled: e.target.value === "true" })
-            }
+    <Block>
+      <PageHeader
+        title="策略参数"
+        description="管理 GLFT 模型参数与做市约束。"
+        actions={
+          <Block
+            display="flex"
+            className={css({
+              gap: "10px"
+            })}
           >
-            <option value="true">开启</option>
-            <option value="false">关闭</option>
-          </select>
-        </label>
-      </div>
-    </div>
+            <Button size={SIZE.compact} kind="tertiary" isLoading={loading} onClick={load}>
+              刷新
+            </Button>
+            <Button size={SIZE.compact} isLoading={saving} onClick={save}>
+              保存参数
+            </Button>
+          </Block>
+        }
+      />
+
+      {error ? (
+        <Notification kind={KIND.negative} closeable={false}>
+          {error}
+        </Notification>
+      ) : null}
+
+      {!params && loading ? (
+        <Notification kind={KIND.info} closeable={false}>
+          正在加载策略参数...
+        </Notification>
+      ) : null}
+
+      {params ? (
+        <Block
+          marginTop="scale700"
+          className={css({
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: "16px",
+            "@media screen and (max-width: 860px)": {
+              gridTemplateColumns: "1fr"
+            }
+          })}
+        >
+          {numericFields.map((field) => (
+            <Block
+              key={field.key}
+              className={css({
+                border: "1px solid #243452",
+                borderRadius: theme.borders.radius500,
+                backgroundColor: "rgba(13, 21, 34, 0.88)"
+              })}
+              paddingTop="scale600"
+              paddingBottom="scale600"
+              paddingLeft="scale600"
+              paddingRight="scale600"
+            >
+              <FormControl label={field.label} caption={field.description}>
+                <Input
+                  type="number"
+                  value={String(params[field.key])}
+                  onChange={(event) => updateNumber(field.key, event.currentTarget.value)}
+                />
+              </FormControl>
+            </Block>
+          ))}
+
+          <Block
+            className={css({
+              border: "1px solid #243452",
+              borderRadius: theme.borders.radius500,
+              backgroundColor: "rgba(13, 21, 34, 0.88)"
+            })}
+            paddingTop="scale600"
+            paddingBottom="scale600"
+            paddingLeft="scale600"
+            paddingRight="scale600"
+          >
+            <Checkbox
+              checked={params.auto_tuning_enabled}
+              onChange={(event) =>
+                setParams((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        auto_tuning_enabled: event.currentTarget.checked
+                      }
+                    : prev
+                )
+              }
+            >
+              启用自动调参
+            </Checkbox>
+          </Block>
+        </Block>
+      ) : null}
+    </Block>
   );
 }
