@@ -1,13 +1,8 @@
 import axios from "axios";
 import { clearToken, getToken, isTokenExpired, notifyAuthExpired } from "./session";
 
-const fallbackApiHost =
-  typeof window !== "undefined" && window.location.hostname
-    ? window.location.hostname
-    : "127.0.0.1";
-
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || `http://${fallbackApiHost}:8000/api`
+  baseURL: import.meta.env.VITE_API_URL || "/api"
 });
 
 api.interceptors.request.use((config) => {
