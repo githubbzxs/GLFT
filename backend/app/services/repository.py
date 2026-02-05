@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import decrypt_text, encrypt_text
 from app.core.security import hash_password
 from app.db import models
 
@@ -157,3 +158,63 @@ async def trade_exists(session: AsyncSession, trade_id: str) -> bool:
         select(models.Trade.id).where(models.Trade.trade_id == trade_id)
     )
     return result.scalar_one_or_none() is not None
+
+
+async def get_or_create_app_config(session: AsyncSession, defaults: dict) -> models.AppConfig:
+    result = await session.execute(select(models.AppConfig).order_by(models.AppConfig.id.desc()))
+    config = result.scalar_one_or_none()
+    if config:
+        return config
+    config = models.AppConfig(**defaults)
+    session.add(config)
+    await session.commit()
+    await session.refresh(config)
+    return config
+
+
+async def update_app_config(session: AsyncSession, payload: dict) -> models.AppConfig:
+    result = await session.execute(select(models.AppConfig).order_by(models.AppConfig.id.desc()))
+    config = result.scalar_one_or_none()
+    if not config:
+        config = models.AppConfig()
+        session.add(config)
+    smtp_password = payload.pop("smtp_password", "")
+    for key, value in payload.items():
+        setattr(config, key, value)
+    if smtp_password:
+        config.encrypted_smtp_password = encrypt_text(smtp_password)
+    await session.commit()
+    await session.refresh(config)
+    return config
+
+
+async def get_current_app_config(session: AsyncSession) -> models.AppConfig | None:
+    result = await session.execute(select(models.AppConfig).order_by(models.AppConfig.id.desc()))
+    return result.scalar_one_or_none()
+
+
+def app_config_to_response(config: models.AppConfig) -> dict:
+    return {
+        "grvt_env": config.grvt_env,
+        "grvt_symbol": config.grvt_symbol,
+        "quote_interval_ms": config.quote_interval_ms,
+        "order_duration_secs": config.order_duration_secs,
+        "time_horizon_seconds": config.time_horizon_seconds,
+        "calibration_window_days": config.calibration_window_days,
+        "calibration_timeframe": config.calibration_timeframe,
+        "calibration_update_time": config.calibration_update_time,
+        "calibration_trade_sample": config.calibration_trade_sample,
+        "log_retention_days": config.log_retention_days,
+        "alert_email_to": config.alert_email_to,
+        "smtp_host": config.smtp_host,
+        "smtp_port": config.smtp_port,
+        "smtp_user": config.smtp_user,
+        "smtp_password_set": bool(config.encrypted_smtp_password),
+        "smtp_tls": config.smtp_tls,
+    }
+
+
+def decrypt_smtp_password(config: models.AppConfig) -> str:
+    if not config.encrypted_smtp_password:
+        return ""
+    return decrypt_text(config.encrypted_smtp_password)

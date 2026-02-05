@@ -15,10 +15,8 @@ from app.core.config import get_settings
 from app.core.crypto import decrypt_text
 from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
-from app.services.engine import StrategyEngine
-from app.services.grvt_client import GrvtClient
-from app.services.market_data import MarketDataService
-from app.services.repository import ensure_admin_user, get_latest_api_keys
+from app.services.config_manager import ConfigManager
+from app.services.repository import ensure_admin_user
 from app.services.state import AppState
 from app.utils.logger import setup_logging
 from app.db import models
@@ -33,6 +31,29 @@ async def _cleanup_logs(days: int) -> None:
         await session.commit()
 
 
+def schedule_jobs(app: FastAPI, config) -> None:
+    scheduler: AsyncIOScheduler = app.state.scheduler
+    hour, minute = config.calibration_update_time.split(":")
+    scheduler.add_job(
+        app.state.config_manager.engine.run_calibration,
+        "cron",
+        hour=int(hour),
+        minute=int(minute),
+        misfire_grace_time=300,
+        id="calibration",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        lambda: asyncio.create_task(_cleanup_logs(config.log_retention_days)),
+        "cron",
+        hour=2,
+        minute=0,
+        misfire_grace_time=300,
+        id="cleanup",
+        replace_existing=True,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -41,65 +62,25 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionLocal() as session:
         await ensure_admin_user(session, settings.admin_username, settings.admin_password)
-    async with AsyncSessionLocal() as session:
-        record = await get_latest_api_keys(session)
-        api_key = settings.grvt_api_key
-        private_key = settings.grvt_private_key
-        sub_account_id = settings.grvt_sub_account_id
-        if record:
-            api_key = decrypt_text(record.encrypted_api_key)
-            private_key = decrypt_text(record.encrypted_private_key)
-            sub_account_id = record.sub_account_id
-    client = GrvtClient(
-        env=settings.grvt_env,
-        api_key=api_key,
-        private_key=private_key,
-        sub_account_id=sub_account_id,
-    )
-    await client.load_markets()
-    symbol = settings.grvt_symbol
-    if symbol not in client._instruments:
-        symbol = client.resolve_symbol("BTC")
 
     app_state = AppState()
-    app_state.market.symbol = symbol
-    inst = client.get_instrument(symbol)
-    if inst:
-        app_state.market.instrument_info = {
-            "tick_size": float(inst.tick_size),
-            "min_size": float(inst.min_size),
-            "base_decimals": inst.base_decimals,
-        }
+    config_manager = ConfigManager(app_state=app_state)
+    await config_manager.initialize()
 
-    market_data = MarketDataService(client=client, state=app_state)
-    engine_manager = StrategyEngine(state=app_state, client=client, session_factory=AsyncSessionLocal)
     app.state.app_state = app_state
-    app.state.engine_manager = engine_manager
-
-    await market_data.start()
-
-    scheduler = AsyncIOScheduler()
-    hour, minute = settings.calibration_update_time.split(":")
-    scheduler.add_job(
-        engine_manager.run_calibration,
-        "cron",
-        hour=int(hour),
-        minute=int(minute),
-        misfire_grace_time=300,
-    )
-    scheduler.add_job(
-        lambda: asyncio.create_task(_cleanup_logs(settings.log_retention_days)),
-        "cron",
-        hour=2,
-        minute=0,
-        misfire_grace_time=300,
-    )
-    scheduler.start()
+    app.state.config_manager = config_manager
+    app.state.scheduler = AsyncIOScheduler()
+    app.state.scheduler.start()
+    schedule_jobs(app, config_manager.snapshot)
+    app.state.schedule_jobs = lambda config: schedule_jobs(app, config)
 
     yield
 
-    await engine_manager.stop()
-    scheduler.shutdown(wait=False)
+    if config_manager.engine:
+        await config_manager.engine.stop()
+    if config_manager.market_data:
+        await config_manager.market_data.stop()
+    app.state.scheduler.shutdown(wait=False)
 
 
 app = FastAPI(lifespan=lifespan, title="GLFT 做市系统")

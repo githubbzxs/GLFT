@@ -27,6 +27,9 @@ export default function Layout() {
           <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} to="/keys">
             API Key 管理
           </NavLink>
+          <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} to="/config">
+            系统配置
+          </NavLink>
           <NavLink className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} to="/alerts">
             告警
           </NavLink>

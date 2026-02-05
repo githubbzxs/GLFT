@@ -126,3 +126,30 @@ class Alert(Base):
     message: Mapped[str] = mapped_column(Text)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppConfig(Base):
+    __tablename__ = "app_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    grvt_env: Mapped[str] = mapped_column(String(16), default="prod")
+    grvt_symbol: Mapped[str] = mapped_column(String(64), default="BTC_USDT_Perp")
+
+    quote_interval_ms: Mapped[int] = mapped_column(Integer, default=250)
+    order_duration_secs: Mapped[int] = mapped_column(Integer, default=10)
+
+    calibration_window_days: Mapped[int] = mapped_column(Integer, default=30)
+    calibration_timeframe: Mapped[str] = mapped_column(String(16), default="5m")
+    calibration_update_time: Mapped[str] = mapped_column(String(8), default="00:10")
+    calibration_trade_sample: Mapped[int] = mapped_column(Integer, default=5000)
+
+    log_retention_days: Mapped[int] = mapped_column(Integer, default=30)
+
+    alert_email_to: Mapped[str] = mapped_column(String(255), default="")
+    smtp_host: Mapped[str] = mapped_column(String(255), default="")
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587)
+    smtp_user: Mapped[str] = mapped_column(String(255), default="")
+    encrypted_smtp_password: Mapped[str] = mapped_column(Text, default="")
+    smtp_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

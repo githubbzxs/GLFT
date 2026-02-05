@@ -11,6 +11,7 @@ class GLFTParams:
     A: float
     k: float
     order_size: float
+    time_horizon_seconds: int
 
 
 def compute_coeff(gamma: float, delta: float, A: float, k: float) -> tuple[float, float]:
@@ -29,7 +30,8 @@ def compute_quotes(
 ) -> tuple[float, float, float]:
     c1, c2 = compute_coeff(params.gamma, params.order_size, params.A, params.k)
     half_spread = c1 + params.order_size / 2.0 * c2 * params.sigma
-    skew = c2 * params.sigma
+    time_factor = max(params.time_horizon_seconds, 1) / 3600.0
+    skew = c2 * params.sigma * math.sqrt(time_factor)
     reservation_price = mid_price - skew * inventory
     bid = reservation_price - half_spread
     ask = reservation_price + half_spread

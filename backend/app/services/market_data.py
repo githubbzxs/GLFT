@@ -13,9 +13,10 @@ class MarketDataService:
         self.client = client
         self.state = state
         self._poll_task: asyncio.Task | None = None
+        self._ws_task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        asyncio.create_task(self.client.connect_ws())
+        self._ws_task = asyncio.create_task(self.client.connect_ws())
         await asyncio.sleep(1)
         await self.client.ws.subscribe(
             "ticker.s",
@@ -23,6 +24,19 @@ class MarketDataService:
             params={"instrument": self.state.market.symbol, "rate": "500"},
         )
         self._poll_task = asyncio.create_task(self._poll_fallback())
+
+    async def stop(self) -> None:
+        if self._poll_task:
+            self._poll_task.cancel()
+            self._poll_task = None
+        if self._ws_task:
+            self._ws_task.cancel()
+            self._ws_task = None
+        for endpoint in list(self.client.ws.ws.keys()):
+            try:
+                await self.client.ws._close_connection(endpoint)
+            except Exception:
+                continue
 
     async def _on_ticker(self, message: dict) -> None:
         data = message.get("result") or message.get("data") or message.get("payload") or message

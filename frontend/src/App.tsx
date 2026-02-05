@@ -7,6 +7,7 @@ import StrategyPage from "./pages/StrategyPage";
 import RiskPage from "./pages/RiskPage";
 import ApiKeysPage from "./pages/ApiKeysPage";
 import AlertsPage from "./pages/AlertsPage";
+import SystemConfigPage from "./pages/SystemConfigPage";
 
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
   const token = localStorage.getItem("token");
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="strategy" element={<StrategyPage />} />
         <Route path="risk" element={<RiskPage />} />
         <Route path="keys" element={<ApiKeysPage />} />
+        <Route path="config" element={<SystemConfigPage />} />
         <Route path="alerts" element={<AlertsPage />} />
       </Route>
     </Routes>

@@ -10,10 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.services.calibration import GLFTCalibrator
 from app.services.grvt_client import GrvtClient
-from app.services.alerts import create_alert, send_email_alert
+from app.services.alerts import AlertConfig, create_alert, send_email_alert
 from app.services.repository import (
     get_or_create_params,
     get_or_create_risk_limits,
+    get_current_app_config,
     record_metric,
     record_order,
     record_risk_event,
@@ -63,6 +64,7 @@ class StrategyEngine:
         self._last_trade_sync = 0.0
         self._last_position_sync = 0.0
         self._risk_manager: RiskManager | None = None
+        self._alert_config: AlertConfig | None = None
 
     async def start(self) -> None:
         if self._running:
@@ -77,6 +79,13 @@ class StrategyEngine:
         if self._task:
             self._task.cancel()
             self._task = None
+
+    def apply_runtime_config(
+        self, quote_interval_ms: int, order_duration_secs: int, alert_config: AlertConfig | None
+    ) -> None:
+        self.config.quote_interval_ms = quote_interval_ms
+        self.config.order_duration_secs = order_duration_secs
+        self._alert_config = alert_config
 
     async def _run_loop(self) -> None:
         while self._running:
@@ -125,7 +134,7 @@ class StrategyEngine:
                 self.state.engine.last_event = reason
                 await record_risk_event(session, "WARN", "RISK_BLOCK", reason or "")
                 await create_alert(session, "WARN", f"风控触发：{reason}")
-                send_email_alert("GLFT 风控触发", f"风控触发：{reason}")
+                send_email_alert("GLFT 风控触发", f"风控触发：{reason}", self._alert_config)
                 return
 
             tuned = self._apply_auto_tuning(params, inventory_usd)
@@ -135,6 +144,7 @@ class StrategyEngine:
                 A=tuned.A,
                 k=tuned.k,
                 order_size=order_size,
+                time_horizon_seconds=params.time_horizon_seconds,
             )
             bid, ask, spread = compute_quotes(mid, inventory_btc, glft_params)
 
@@ -270,7 +280,7 @@ class StrategyEngine:
         except Exception:
             await record_risk_event(session, "WARN", "ORDER_FAIL", "买单提交失败")
             await create_alert(session, "WARN", "买单提交失败")
-            send_email_alert("GLFT 下单失败", "买单提交失败")
+            send_email_alert("GLFT 下单失败", "买单提交失败", self._alert_config)
 
         try:
             ask_order = await self.client.create_limit_order(
@@ -299,7 +309,7 @@ class StrategyEngine:
         except Exception:
             await record_risk_event(session, "WARN", "ORDER_FAIL", "卖单提交失败")
             await create_alert(session, "WARN", "卖单提交失败")
-            send_email_alert("GLFT 下单失败", "卖单提交失败")
+            send_email_alert("GLFT 下单失败", "卖单提交失败", self._alert_config)
         self._last_quotes = (bid, ask)
 
     async def _estimate_leverage(self, mid_price: float, order_size: float) -> float:
@@ -321,12 +331,22 @@ class StrategyEngine:
 
     async def run_calibration(self) -> None:
         settings = get_settings()
+        window_days = settings.calibration_window_days
+        timeframe = settings.calibration_timeframe
+        trade_sample = settings.calibration_trade_sample
+        async with self.session_factory() as session:
+            config = await get_current_app_config(session)
+            if config:
+                window_days = config.calibration_window_days
+                timeframe = config.calibration_timeframe
+                trade_sample = config.calibration_trade_sample
+
         calibrator = GLFTCalibrator(
             client=self.client,
             symbol=self.state.market.symbol,
-            window_days=settings.calibration_window_days,
-            timeframe=settings.calibration_timeframe,
-            trade_sample=settings.calibration_trade_sample,
+            window_days=window_days,
+            timeframe=timeframe,
+            trade_sample=trade_sample,
         )
         result = await calibrator.calibrate()
         async with self.session_factory() as session:

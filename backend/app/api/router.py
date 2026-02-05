@@ -11,6 +11,7 @@ from app.db import models
 from app.db.session import get_db
 from app.schemas.alerts import AlertResponse
 from app.schemas.auth import LoginRequest, TokenResponse, UserResponse
+from app.schemas.config import AppConfigResponse, AppConfigUpdate
 from app.schemas.dashboard import DashboardMetrics
 from app.schemas.keys import ApiKeyResponse, ApiKeyUpdate
 from app.schemas.market import OrderResponse, PositionResponse, TradeResponse
@@ -18,10 +19,13 @@ from app.schemas.risk import RiskLimitsUpdate, RiskStatusResponse
 from app.schemas.strategy import StrategyParamsResponse, StrategyParamsUpdate
 from app.services.reports import generate_pnl_report
 from app.services.repository import (
+    app_config_to_response,
+    get_current_app_config,
     get_latest_api_keys,
     get_or_create_params,
     get_or_create_risk_limits,
     save_api_keys,
+    update_app_config,
     update_params,
     update_risk_limits,
 )
@@ -50,6 +54,7 @@ async def dashboard_metrics(
     request: Request, user: models.User = Depends(get_current_user)
 ) -> DashboardMetrics:
     state = request.app.state.app_state
+    engine = request.app.state.config_manager.engine
     mid = state.market.mid_price
     inventory_btc = state.position.size
     inventory_usd = inventory_btc * mid if mid else 0.0
@@ -61,11 +66,11 @@ async def dashboard_metrics(
         unrealized_pnl=state.position.unrealized_pnl,
         open_orders=len(state.engine.open_order_ids),
         spread=spread,
-        cancel_rate_per_min=request.app.state.engine_manager._risk_manager.cancel_rate_per_min()
-        if request.app.state.engine_manager._risk_manager
+        cancel_rate_per_min=engine._risk_manager.cancel_rate_per_min()
+        if engine and engine._risk_manager
         else 0.0,
-        order_rate_per_min=request.app.state.engine_manager._risk_manager.order_rate_per_min()
-        if request.app.state.engine_manager._risk_manager
+        order_rate_per_min=engine._risk_manager.order_rate_per_min()
+        if engine and engine._risk_manager
         else 0.0,
     )
 
@@ -171,9 +176,10 @@ async def update_strategy_params(
 
 @router.get("/risk/status", response_model=RiskStatusResponse)
 async def risk_status(request: Request, user: models.User = Depends(get_current_user)) -> RiskStatusResponse:
-    rm = request.app.state.engine_manager._risk_manager
+    engine = request.app.state.config_manager.engine
+    rm = engine._risk_manager if engine else None
     return RiskStatusResponse(
-        is_trading=request.app.state.engine_manager._running,
+        is_trading=engine._running if engine else False,
         last_event=request.app.state.app_state.engine.last_event,
         cancel_rate_per_min=rm.cancel_rate_per_min() if rm else 0.0,
         order_rate_per_min=rm.order_rate_per_min() if rm else 0.0,
@@ -193,6 +199,7 @@ async def update_limits(
 @router.post("/keys", response_model=ApiKeyResponse)
 async def save_keys(
     payload: ApiKeyUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ) -> ApiKeyResponse:
@@ -203,6 +210,7 @@ async def save_keys(
         payload.sub_account_id,
         payload.ip_whitelist or "",
     )
+    await request.app.state.config_manager.reload_client()
     return ApiKeyResponse(sub_account_id=record.sub_account_id, ip_whitelist=record.ip_whitelist)
 
 
@@ -219,13 +227,13 @@ async def get_keys(
 
 @router.post("/engine/start")
 async def engine_start(request: Request, user: models.User = Depends(get_current_user)) -> dict:
-    await request.app.state.engine_manager.start()
+    await request.app.state.config_manager.engine.start()
     return {"status": "running"}
 
 
 @router.post("/engine/stop")
 async def engine_stop(request: Request, user: models.User = Depends(get_current_user)) -> dict:
-    await request.app.state.engine_manager.stop()
+    await request.app.state.config_manager.engine.stop()
     return {"status": "stopped"}
 
 
@@ -265,3 +273,27 @@ async def report_pnl(
 ) -> Response:
     csv_data = await generate_pnl_report(db)
     return Response(content=csv_data, media_type="text/csv")
+
+
+@router.get("/config", response_model=AppConfigResponse)
+async def get_config(
+    db: AsyncSession = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> AppConfigResponse:
+    config = await get_current_app_config(db)
+    if not config:
+        raise HTTPException(status_code=404, detail="未初始化配置")
+    return AppConfigResponse(**app_config_to_response(config))
+
+
+@router.post("/config", response_model=AppConfigResponse)
+async def update_config(
+    payload: AppConfigUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> AppConfigResponse:
+    config = await update_app_config(db, payload.model_dump())
+    await request.app.state.config_manager.apply_config()
+    request.app.state.schedule_jobs(config)
+    return AppConfigResponse(**app_config_to_response(config))
