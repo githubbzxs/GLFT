@@ -4,7 +4,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import decrypt_text, encrypt_text
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.db import models
 
 
@@ -12,6 +12,9 @@ async def ensure_admin_user(session: AsyncSession, username: str, password: str)
     result = await session.execute(select(models.User).where(models.User.username == username))
     user = result.scalar_one_or_none()
     if user:
+        if password and not verify_password(password, user.password_hash):
+            user.password_hash = hash_password(password)
+            await session.commit()
         return
     session.add(models.User(username=username, password_hash=hash_password(password)))
     await session.commit()
@@ -199,7 +202,6 @@ def app_config_to_response(config: models.AppConfig) -> dict:
         "grvt_symbol": config.grvt_symbol,
         "quote_interval_ms": config.quote_interval_ms,
         "order_duration_secs": config.order_duration_secs,
-        "time_horizon_seconds": config.time_horizon_seconds,
         "calibration_window_days": config.calibration_window_days,
         "calibration_timeframe": config.calibration_timeframe,
         "calibration_update_time": config.calibration_update_time,
