@@ -113,11 +113,13 @@ class ConfigManager:
     async def _build_services(
         self, config, api_key: str, private_key: str, sub_account_id: str
     ) -> None:
+        loop = asyncio.get_running_loop()
         self.client = GrvtClient(
             env=config.grvt_env,
             api_key=api_key,
             private_key=private_key,
             sub_account_id=sub_account_id,
+            loop=loop,
         )
         await self.client.load_markets()
         symbol = config.grvt_symbol

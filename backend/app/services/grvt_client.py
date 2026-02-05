@@ -33,6 +33,7 @@ class GrvtClient:
         api_key: str,
         private_key: str,
         sub_account_id: str,
+        loop: asyncio.AbstractEventLoop | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self.logger = logger or logging.getLogger(__name__)
@@ -42,8 +43,13 @@ class GrvtClient:
             "private_key": private_key,
             "trading_account_id": sub_account_id,
         }
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
         self.rest = GrvtCcxtPro(env=self.env, logger=self.logger, parameters=self.parameters)
-        self.ws = GrvtCcxtWS(env=self.env, logger=self.logger, parameters=self.parameters)
+        self.ws = GrvtCcxtWS(env=self.env, loop=loop, logger=self.logger, parameters=self.parameters)
         self._markets_loaded = False
         self._instruments: dict[str, GrvtInstrument] = {}
 

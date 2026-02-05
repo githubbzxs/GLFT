@@ -15,7 +15,7 @@ from app.schemas.config import AppConfigResponse, AppConfigUpdate
 from app.schemas.dashboard import DashboardMetrics
 from app.schemas.keys import ApiKeyResponse, ApiKeyUpdate
 from app.schemas.market import OrderResponse, PositionResponse, TradeResponse
-from app.schemas.risk import RiskLimitsUpdate, RiskStatusResponse
+from app.schemas.risk import RiskLimitsResponse, RiskLimitsUpdate, RiskStatusResponse
 from app.schemas.strategy import StrategyParamsResponse, StrategyParamsUpdate
 from app.services.reports import generate_pnl_report
 from app.services.repository import (
@@ -188,6 +188,21 @@ async def risk_status(request: Request, user: models.User = Depends(get_current_
         last_event=request.app.state.app_state.engine.last_event,
         cancel_rate_per_min=rm.cancel_rate_per_min() if rm else 0.0,
         order_rate_per_min=rm.order_rate_per_min() if rm else 0.0,
+    )
+
+
+@router.get("/risk/limits", response_model=RiskLimitsResponse)
+async def get_limits(
+    db: AsyncSession = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+) -> RiskLimitsResponse:
+    limits = await get_or_create_risk_limits(db)
+    return RiskLimitsResponse(
+        max_inventory_usd=limits.max_inventory_usd,
+        max_order_usd=limits.max_order_usd,
+        max_leverage=limits.max_leverage,
+        max_cancel_rate_per_min=limits.max_cancel_rate_per_min,
+        max_order_rate_per_min=limits.max_order_rate_per_min,
     )
 
 

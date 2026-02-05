@@ -6,13 +6,10 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import delete
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.router import router
 from app.core.config import get_settings
-from app.core.crypto import decrypt_text
 from app.db.base import Base
 from app.db.session import AsyncSessionLocal, engine
 from app.services.config_manager import ConfigManager
@@ -84,13 +81,5 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, title="GLFT 做市系统")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 app.include_router(router, prefix=get_settings().api_prefix)
