@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from jose import jwt
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
@@ -15,7 +15,12 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password or not hashed_password:
+        return False
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except (TypeError, ValueError):
+        return False
 
 
 def create_access_token(subject: str) -> str:
@@ -26,9 +31,22 @@ def create_access_token(subject: str) -> str:
 
 
 def decode_access_token(token: str) -> str | None:
+    if not token or not token.strip():
+        return None
     settings = get_settings()
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
-        return payload.get("sub")
-    except Exception:
+        payload = jwt.decode(
+            token.strip(),
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except JWTError:
         return None
+
+    subject = payload.get("sub")
+    if not isinstance(subject, str):
+        return None
+    subject = subject.strip()
+    if not subject:
+        return None
+    return subject

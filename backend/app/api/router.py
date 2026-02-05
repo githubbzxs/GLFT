@@ -36,9 +36,14 @@ router = APIRouter()
 
 @router.post("/auth/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenResponse:
-    result = await db.execute(select(models.User).where(models.User.username == payload.username))
+    username = payload.username.strip()
+    password = payload.password
+    if not username or not password:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    result = await db.execute(select(models.User).where(models.User.username == username))
     user = result.scalar_one_or_none()
-    if not user or not verify_password(payload.password, user.password_hash):
+    if not user or not user.is_active or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(user.username)
     return TokenResponse(access_token=token)
